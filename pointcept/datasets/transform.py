@@ -1,6 +1,34 @@
 """
 3D Point Cloud Augmentation
 
+This module provides a comprehensive set of data augmentation and transformation
+operations for 3D point cloud data. It includes geometric transformations,
+color augmentations, and point sampling methods.
+
+The transformation system is built on a registry pattern that allows:
+- Dynamic registration of new transforms
+- Composition of multiple transforms
+- Configuration-based transform building
+- Custom transform development
+
+Key Features:
+- Geometric Transformations:
+  - Random rotation, scaling, and translation
+  - Elastic distortion
+  - Point dropout and jittering
+- Color Augmentations:
+  - Color normalization and jittering
+  - Hue and saturation adjustment
+  - Grayscale conversion
+- Point Processing:
+  - Grid sampling and spherical cropping
+  - Instance parsing
+  - Boundary handling
+- Utility Transforms:
+  - Data collection and copying
+  - Tensor conversion
+  - Coordinate normalization
+
 Inspired by chrischoy/SpatioTemporalSegmentation
 
 Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
@@ -25,6 +53,25 @@ TRANSFORMS = Registry("transforms")
 
 @TRANSFORMS.register_module()
 class Collect(object):
+    """Collect specified keys from the data dictionary.
+    
+    This transform collects specified keys from the data dictionary and
+    optionally concatenates multiple features into a single tensor.
+    
+    Args:
+        keys (list[str]): Keys to collect from the data dictionary
+        offset_keys_dict (dict, optional): Dictionary mapping offset key names
+            to their corresponding coordinate keys. Default: {"offset": "coord"}
+        **kwargs: Additional key groups to concatenate as features
+        
+    Example:
+        >>> # Collect coordinates and concatenate color and normal as features
+        >>> transform = Collect(
+        ...     keys=["coord"],
+        ...     offset_keys_dict={"offset": "coord"},
+        ...     feat_keys=["color", "normal"]
+        ... )
+    """
     def __init__(self, keys, offset_keys_dict=None, **kwargs):
         """
         e.g. Collect(keys=[coord], feat_keys=[coord, color])
@@ -111,6 +158,18 @@ class Add(object):
 
 @TRANSFORMS.register_module()
 class NormalizeColor(object):
+    """Normalize color values to [-1, 1] range.
+    
+    This transform normalizes color values from [0, 255] to [-1, 1] range,
+    with input validation and handling of invalid values.
+    
+    The normalization formula is: color = color / 127.5 - 1
+    
+    Note:
+        - Input colors should be in range [0, 255]
+        - Output colors will be in range [-1, 1]
+        - NaN and Inf values are handled gracefully
+    """
     def __call__(self, data_dict):
         if "color" in data_dict.keys():
             # Add validation and clipping
@@ -228,6 +287,28 @@ class RandomDropout(object):
 
 @TRANSFORMS.register_module()
 class RandomRotate(object):
+    """Randomly rotate the point cloud around a specified axis.
+    
+    This transform applies random rotation to the point cloud around a specified
+    axis (x, y, or z) by a random angle within the given range.
+    
+    Args:
+        angle (tuple[float], optional): Range of rotation angles in radians.
+            Default: [-1, 1] * pi
+        center (tuple[float], optional): Center of rotation. Default: None
+        axis (str, optional): Axis of rotation ('x', 'y', or 'z'). Default: 'z'
+        always_apply (bool, optional): Whether to always apply rotation.
+            Default: False
+        p (float, optional): Probability of applying rotation. Default: 0.5
+        
+    Example:
+        >>> # Rotate around z-axis by ±45 degrees with 75% probability
+        >>> transform = RandomRotate(
+        ...     angle=[-0.78539816, 0.78539816],
+        ...     axis='z',
+        ...     p=0.75
+        ... )
+    """
     def __init__(self, angle=None, center=None, axis="z", always_apply=False, p=0.5):
         self.angle = [-1, 1] if angle is None else angle
         self.axis = axis
@@ -789,6 +870,38 @@ class ElasticDistortion(object):
 
 @TRANSFORMS.register_module()
 class GridSample(object):
+    """Sample points using a grid-based approach.
+    
+    This transform samples points by dividing the space into a grid and
+    selecting representative points from each occupied grid cell. It supports
+    different sampling modes and can return various grid-related information.
+    
+    Args:
+        grid_size (float, optional): Size of grid cells. Default: 0.05
+        hash_type (str, optional): Type of hash function ('fnv' or 'ravel').
+            Default: 'fnv'
+        mode (str, optional): Sampling mode ('train' or 'test'). Default: 'train'
+        keys (tuple[str], optional): Keys to process. Default: ('coord', 'color',
+            'normal', 'segment')
+        return_inverse (bool, optional): Return indices to reconstruct input.
+            Default: False
+        return_grid_coord (bool, optional): Return grid coordinates.
+            Default: False
+        return_min_coord (bool, optional): Return minimum coordinates.
+            Default: False
+        return_displacement (bool, optional): Return point displacements.
+            Default: False
+        project_displacement (bool, optional): Project displacements.
+            Default: False
+        cache_grid (bool, optional): Cache grid computations. Default: True
+            
+    Example:
+        >>> transform = GridSample(
+        ...     grid_size=0.02,
+        ...     return_grid_coord=True,
+        ...     return_displacement=True
+        ... )
+    """
     def __init__(
         self,
         grid_size=0.05,
@@ -1185,13 +1298,43 @@ class InstanceParser(object):
 
 
 class Compose(object):
+    """Composes multiple transforms together.
+    
+    This class allows for the composition of multiple transform operations
+    that are executed in sequence. Each transform is applied to the output
+    of the previous transform.
+    
+    Args:
+        cfg (list[dict]): List of transform configurations. Each dict should
+            contain:
+            - type: The registered name of the transform
+            - args: Arguments specific to the transform
+            
+    Example:
+        >>> transforms_cfg = [
+        ...     dict(type='NormalizeColor'),
+        ...     dict(type='RandomRotate', angle=[-0.78539816, 0.78539816]),
+        ...     dict(type='RandomScale', scale=[0.9, 1.1])
+        ... ]
+        >>> transform = Compose(transforms_cfg)
+        >>> data = transform(data_dict)
+    """
+    
     def __init__(self, cfg=None):
-        self.cfg = cfg if cfg is not None else []
         self.transforms = []
-        for t_cfg in self.cfg:
-            self.transforms.append(TRANSFORMS.build(t_cfg))
-
+        if cfg is not None:
+            for t_cfg in cfg:
+                self.transforms.append(TRANSFORMS.build(t_cfg))
+    
     def __call__(self, data_dict):
+        """Apply transforms sequentially.
+        
+        Args:
+            data_dict (dict): Dictionary containing point cloud data
+            
+        Returns:
+            dict: Transformed point cloud data
+        """
         for t in self.transforms:
             data_dict = t(data_dict)
         return data_dict

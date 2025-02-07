@@ -1,6 +1,25 @@
 """
 Default Datasets
 
+This module provides base dataset classes for the Pointcept framework, including
+the DefaultDataset for standard point cloud data handling and ConcatDataset for
+combining multiple datasets.
+
+The module implements:
+- Base dataset functionality for point cloud data
+- Standard data loading and preprocessing
+- Data caching mechanisms
+- Test-time augmentation support
+- Multi-dataset concatenation
+
+Features:
+- Flexible data loading
+- Automatic data type conversion
+- Cache support for faster loading
+- Test/train mode switching
+- Data augmentation pipeline
+- Multi-dataset handling
+
 Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
 Please cite our work if the code is helpful to you.
 """
@@ -22,14 +41,41 @@ from .transform import Compose, TRANSFORMS
 
 @DATASETS.register_module()
 class DefaultDataset(Dataset):
+    """Base dataset class for point cloud data.
+    
+    This class provides standard functionality for loading and processing point
+    cloud data, including support for various point attributes, data augmentation,
+    and test-time processing.
+    
+    Attributes:
+        VALID_ASSETS (list): Valid point cloud attributes (coord, color, etc.)
+        data_root (str): Root directory for dataset
+        split (str): Dataset split (train/val/test)
+        transform (Compose): Data transformation pipeline
+        cache (bool): Whether to cache data in memory
+        ignore_index (int): Label value to ignore in evaluation
+        loop (int): Number of times to repeat dataset per epoch
+        test_mode (bool): Whether in test mode
+        test_cfg (dict): Test-time configuration
+        
+    Args:
+        split (str): Dataset split name. Default: 'train'
+        data_root (str): Dataset root directory. Default: 'data/dataset'
+        transform (list): List of data transformations. Default: None
+        test_mode (bool): Whether in test mode. Default: False
+        test_cfg (dict): Test-time configuration. Default: None
+        cache (bool): Whether to cache data. Default: False
+        ignore_index (int): Index to ignore. Default: -1
+        loop (int): Dataset repeat factor. Default: 1
+    """
     VALID_ASSETS = [
-        "coord",
-        "color",
-        "normal",
-        "strength",
-        "segment",
-        "instance",
-        "pose",
+        "coord",  # Point coordinates (N, 3)
+        "color",  # RGB colors (N, 3)
+        "normal",  # Normal vectors (N, 3)
+        "strength",  # Intensity values (N, 1)
+        "segment",  # Semantic labels (N,)
+        "instance",  # Instance labels (N,)
+        "pose",  # Pose information
     ]
 
     def __init__(
@@ -72,6 +118,11 @@ class DefaultDataset(Dataset):
         )
 
     def get_data_list(self):
+        """Get list of data files.
+        
+        Returns:
+            list: List of data file paths
+        """
         if isinstance(self.split, str):
             data_list = glob.glob(os.path.join(self.data_root, self.split, "*"))
         elif isinstance(self.split, Sequence):
@@ -83,6 +134,14 @@ class DefaultDataset(Dataset):
         return data_list
 
     def get_data(self, idx):
+        """Load data from disk or cache.
+        
+        Args:
+            idx (int): Data index
+            
+        Returns:
+            dict: Dictionary containing point cloud data and attributes
+        """
         data_path = self.data_list[idx % len(self.data_list)]
         name = self.get_data_name(idx)
         if self.cache:
@@ -127,12 +186,31 @@ class DefaultDataset(Dataset):
         return os.path.basename(self.data_list[idx % len(self.data_list)])
 
     def prepare_train_data(self, idx):
+        """Prepare data for training.
+        
+        Args:
+            idx (int): Data index
+            
+        Returns:
+            dict: Processed data dictionary
+        """
         # load data
         data_dict = self.get_data(idx)
         data_dict = self.transform(data_dict)
         return data_dict
 
     def prepare_test_data(self, idx):
+        """Prepare data for testing.
+        
+        This method handles test-time augmentation and sliding window inference
+        if configured.
+        
+        Args:
+            idx (int): Data index
+            
+        Returns:
+            dict: Dictionary containing processed fragments and metadata
+        """
         # load data
         data_dict = self.get_data(idx)
         data_dict = self.transform(data_dict)
@@ -177,6 +255,28 @@ class DefaultDataset(Dataset):
 
 @DATASETS.register_module()
 class ConcatDataset(Dataset):
+    """Dataset class for concatenating multiple datasets.
+    
+    This class enables training on multiple datasets simultaneously by combining
+    them into a single dataset. It maintains the original dataset properties
+    while providing a unified interface.
+    
+    Attributes:
+        datasets (list): List of dataset instances
+        loop (int): Number of times to repeat the combined dataset
+        data_list (list): Combined list of data indices
+        
+    Args:
+        datasets (list[dict]): List of dataset configurations
+        loop (int): Dataset repeat factor. Default: 1
+        
+    Example:
+        >>> cfg = [
+        ...     dict(type='ScanNetDataset', data_root='data/scannet'),
+        ...     dict(type='S3DISDataset', data_root='data/s3dis')
+        ... ]
+        >>> dataset = ConcatDataset(cfg)
+    """
     def __init__(self, datasets, loop=1):
         super(ConcatDataset, self).__init__()
         self.datasets = [build_dataset(dataset) for dataset in datasets]

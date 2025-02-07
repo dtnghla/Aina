@@ -23,6 +23,38 @@ from .transform import Compose
 
 @DATASETS.register_module()
 class ModelNetDataset(Dataset):
+    """
+    Dataset class for ModelNet40 point cloud classification.
+    
+    This dataset provides sampled point clouds from ModelNet40, including XYZ coordinates
+    and normal vectors (10k points per shape). The dataset can be downloaded from:
+    https://shapenet.cs.stanford.edu/media/modelnet40_normal_resampled.zip
+    
+    Args:
+        split (str, optional): Dataset split ('train' or 'test'). Defaults to 'train'
+        data_root (str, optional): Root directory of dataset. Defaults to 'data/modelnet40'
+        class_names (list, optional): List of class names to use
+        transform (list, optional): List of data transformations to apply
+        num_points (int, optional): Number of points per sample. Defaults to 8192
+        uniform_sampling (bool, optional): Whether to use uniform sampling. Defaults to True
+        save_record (bool, optional): Whether to save dataset records. Defaults to True
+        test_mode (bool, optional): Whether in test mode. Defaults to False
+        test_cfg (dict, optional): Test-time configuration
+        loop (int, optional): Number of times to repeat dataset. Defaults to 1
+    
+    Attributes:
+        data_root (str): Root directory of dataset
+        class_names (dict): Mapping from class names to indices
+        split (str): Dataset split
+        num_point (int): Number of points per sample
+        uniform_sampling (bool): Whether using uniform sampling
+        transform (Compose): Data transformation pipeline
+        loop (int): Dataset repeat factor
+        test_mode (bool): Whether in test mode
+        test_cfg (dict): Test-time configuration
+        data_list (list): List of data samples
+    """
+
     def __init__(
         self,
         split="train",
@@ -36,6 +68,21 @@ class ModelNetDataset(Dataset):
         test_cfg=None,
         loop=1,
     ):
+        """
+        Initialize the ModelNet40 dataset.
+
+        Args:
+            split (str, optional): Dataset split ('train' or 'test'). Defaults to 'train'
+            data_root (str, optional): Root directory of dataset. Defaults to 'data/modelnet40'
+            class_names (list, optional): List of class names to use
+            transform (list, optional): List of data transformations to apply
+            num_points (int, optional): Number of points per sample. Defaults to 8192
+            uniform_sampling (bool, optional): Whether to use uniform sampling. Defaults to True
+            save_record (bool, optional): Whether to save dataset records. Defaults to True
+            test_mode (bool, optional): Whether in test mode. Defaults to False
+            test_cfg (dict, optional): Test-time configuration
+            loop (int, optional): Number of times to repeat dataset. Defaults to 1
+        """
         super().__init__()
         self.data_root = data_root
         self.class_names = dict(zip(class_names, range(len(class_names))))
@@ -81,6 +128,18 @@ class ModelNetDataset(Dataset):
                 torch.save(self.data, record_path)
 
     def get_data(self, idx):
+        """
+        Get data sample by index.
+        
+        Args:
+            idx (int): Index of the data sample
+            
+        Returns:
+            dict: Data dictionary containing:
+                - coord (np.ndarray): Point coordinates
+                - normal (np.ndarray): Point normal vectors
+                - category (np.ndarray): Object category label
+        """
         data_idx = idx % len(self.data_list)
         data_name = self.data_list[data_idx]
         if data_name in self.data.keys():
@@ -107,6 +166,12 @@ class ModelNetDataset(Dataset):
             return dict(coord=coord, normal=normal, category=category)
 
     def get_data_list(self):
+        """
+        Get list of all data samples.
+        
+        Returns:
+            np.ndarray: Array of data sample names
+        """
         assert isinstance(self.split, str)
         split_path = os.path.join(
             self.data_root, "modelnet40_{}.txt".format(self.split)
@@ -115,24 +180,66 @@ class ModelNetDataset(Dataset):
         return data_list
 
     def get_data_name(self, idx):
+        """
+        Get name of data sample by index.
+        
+        Args:
+            idx (int): Index of the data sample
+            
+        Returns:
+            str: Name of the data sample
+        """
         data_idx = idx % len(self.data_list)
         return self.data_list[data_idx]
 
     def __getitem__(self, idx):
+        """
+        Get data sample by index.
+        
+        Args:
+            idx (int): Index of the data sample
+            
+        Returns:
+            dict: Data dictionary with transformed data in test or train mode
+        """
         if self.test_mode:
             return self.prepare_test_data(idx)
         else:
             return self.prepare_train_data(idx)
 
     def __len__(self):
+        """
+        Get total number of samples.
+        
+        Returns:
+            int: Number of samples times loop factor
+        """
         return len(self.data_list) * self.loop
 
     def prepare_train_data(self, idx):
+        """
+        Prepare data sample for training.
+        
+        Args:
+            idx (int): Index of the data sample
+            
+        Returns:
+            dict: Transformed data dictionary for training
+        """
         data_dict = self.get_data(idx)
         data_dict = self.transform(data_dict)
         return data_dict
 
     def prepare_test_data(self, idx):
+        """
+        Prepare data sample for testing.
+        
+        Args:
+            idx (int): Index of the data sample
+            
+        Returns:
+            dict: Transformed data dictionary for testing with multiple augmentations
+        """
         assert idx < len(self.data_list)
         data_dict = self.get_data(idx)
         category = data_dict.pop("category")

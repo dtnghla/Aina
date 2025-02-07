@@ -10,12 +10,27 @@ from pointops._C import (
 
 
 class AttentionRelationStep(Function):
+    """
+    Custom autograd Function implementing the relation step of attention mechanism for point clouds.
+    This class computes attention weights between pairs of points based on their query and key features.
+    """
+
     @staticmethod
     def forward(ctx, query, key, weight, index_target, index_refer):
         """
-        input - query: (n, g, c), key: (n, g, c), weight: (c)  1_c for scatter attention,
-                index_target: (m), index_refer: (m)
-        output - relation: (M, g)
+        Forward pass of attention relation step.
+
+        Args:
+            ctx: Context object for autograd.
+            query (torch.Tensor): Query features (n, g, c), where n is number of points,
+                                g is number of groups, and c is feature dimension.
+            key (torch.Tensor): Key features (n, g, c).
+            weight (torch.Tensor): Weight vector (c) for scatter attention.
+            index_target (torch.Tensor): Target indices (m).
+            index_refer (torch.Tensor): Reference indices (m).
+
+        Returns:
+            torch.Tensor: Attention relation weights (m, g).
         """
 
         assert (
@@ -39,6 +54,21 @@ class AttentionRelationStep(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        """
+        Backward pass of attention relation step.
+
+        Args:
+            ctx: Context object for autograd.
+            grad_output (torch.Tensor): Gradient of the loss with respect to output (m, g).
+
+        Returns:
+            tuple: (grad_query, grad_key, None, None, None) containing gradients for:
+                - grad_query: Query features (n, g, c)
+                - grad_key: Key features (n, g, c)
+                - weight: No gradient
+                - index_target: No gradient
+                - index_refer: No gradient
+        """
         query, key, weight, index_target, index_refer = ctx.saved_tensors
         n, g, c = query.shape
         m = index_target.shape[0]
@@ -63,12 +93,25 @@ class AttentionRelationStep(Function):
 
 
 class AttentionFusionStep(Function):
+    """
+    Custom autograd Function implementing the fusion step of attention mechanism for point clouds.
+    This class fuses features based on computed attention weights.
+    """
+
     @staticmethod
     def forward(ctx, weight, value, index_target, index_refer):
         """
-        input - weight: (m, g), value: (n, g, c)
-                index_target: (m), index_value: (m)
-        output - output: (n, g, c)
+        Forward pass of attention fusion step.
+
+        Args:
+            ctx: Context object for autograd.
+            weight (torch.Tensor): Attention weights (m, g).
+            value (torch.Tensor): Value features (n, g, c).
+            index_target (torch.Tensor): Target indices (m).
+            index_refer (torch.Tensor): Reference indices (m).
+
+        Returns:
+            torch.Tensor: Fused features (n, g, c).
         """
 
         assert (
@@ -93,8 +136,18 @@ class AttentionFusionStep(Function):
     @staticmethod
     def backward(ctx, grad_output):
         """
-        input: grad_output: (n, g, c)
-        output: grad_weight: (m, g), grad_value: (n, g, c), none, none
+        Backward pass of attention fusion step.
+
+        Args:
+            ctx: Context object for autograd.
+            grad_output (torch.Tensor): Gradient of the loss with respect to output (n, g, c).
+
+        Returns:
+            tuple: (grad_weight, grad_value, None, None) containing gradients for:
+                - grad_weight: Attention weights (m, g)
+                - grad_value: Value features (n, g, c)
+                - index_target: No gradient
+                - index_refer: No gradient
         """
         weight, value, index_target, index_refer = ctx.saved_tensors
         n, g, c = value.shape

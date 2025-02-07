@@ -21,6 +21,13 @@ This variable is set when processes are spawned by `launch()` in "engine/launch.
 
 
 def get_world_size() -> int:
+    """
+    Get the size of the world (total number of distributed processes).
+
+    Returns:
+        int: Number of processes in the distributed training. Returns 1 if distributed
+        training is not initialized.
+    """
     if not dist.is_available():
         return 1
     if not dist.is_initialized():
@@ -29,6 +36,13 @@ def get_world_size() -> int:
 
 
 def get_rank() -> int:
+    """
+    Get the rank of the current process in the world.
+
+    Returns:
+        int: Global rank of current process. Returns 0 if distributed training
+        is not initialized.
+    """
     if not dist.is_available():
         return 0
     if not dist.is_initialized():
@@ -38,8 +52,14 @@ def get_rank() -> int:
 
 def get_local_rank() -> int:
     """
+    Get the rank of current process within the local machine.
+
     Returns:
-        The rank of the current process within the local (per-machine) process group.
+        int: Local rank of current process within its machine. Returns 0 if
+        distributed training is not initialized.
+
+    Raises:
+        AssertionError: If local process group is not created.
     """
     if not dist.is_available():
         return 0
@@ -53,9 +73,11 @@ def get_local_rank() -> int:
 
 def get_local_size() -> int:
     """
+    Get the size of the local process group (number of processes per machine).
+
     Returns:
-        The size of the per-machine process group,
-        i.e. the number of processes per machine.
+        int: Number of processes on the local machine. Returns 1 if distributed
+        training is not initialized.
     """
     if not dist.is_available():
         return 1
@@ -65,13 +87,25 @@ def get_local_size() -> int:
 
 
 def is_main_process() -> bool:
+    """
+    Check if current process is the main process (rank 0).
+
+    Returns:
+        bool: True if current process is the main process (rank 0).
+    """
     return get_rank() == 0
 
 
 def synchronize():
     """
-    Helper function to synchronize (barrier) among all processes when
-    using distributed training
+    Synchronize all processes in distributed training.
+
+    This function creates a barrier that all processes must reach before proceeding.
+    It's useful for ensuring all processes are at the same point in training.
+
+    Note:
+        - Does nothing if distributed training is not initialized
+        - Uses device-specific barrier for NCCL backend
     """
     if not dist.is_available():
         return
@@ -91,8 +125,11 @@ def synchronize():
 @functools.lru_cache()
 def _get_global_gloo_group():
     """
-    Return a process group based on gloo backend, containing all the ranks
-    The result is cached.
+    Get or create a process group based on gloo backend.
+
+    Returns:
+        ProcessGroup: A process group using gloo backend that contains all ranks.
+        Result is cached for efficiency.
     """
     if dist.get_backend() == "nccl":
         return dist.new_group(backend="gloo")
@@ -102,13 +139,15 @@ def _get_global_gloo_group():
 
 def all_gather(data, group=None):
     """
-    Run all_gather on arbitrary picklable data (not necessarily tensors).
+    Gather data from all processes in a way that works with any picklable data.
+
     Args:
-        data: any picklable object
-        group: a torch process group. By default, will use a group which
-            contains all ranks on gloo backend.
+        data: Any picklable object to be gathered from all processes.
+        group (ProcessGroup, optional): Process group to gather from. Defaults to
+            a global gloo group to reduce GPU memory usage.
+
     Returns:
-        list[data]: list of data gathered from each rank
+        list: List of gathered data from each rank.
     """
     if get_world_size() == 1:
         return [data]
@@ -127,15 +166,17 @@ def all_gather(data, group=None):
 
 def gather(data, dst=0, group=None):
     """
-    Run gather on arbitrary picklable data (not necessarily tensors).
+    Gather data from all processes to a specific destination rank.
+
     Args:
-        data: any picklable object
-        dst (int): destination rank
-        group: a torch process group. By default, will use a group which
-            contains all ranks on gloo backend.
+        data: Any picklable object to be gathered.
+        dst (int, optional): Destination rank to gather to. Defaults to 0.
+        group (ProcessGroup, optional): Process group to gather from. Defaults to
+            a global gloo group.
+
     Returns:
-        list[data]: on dst, a list of data gathered from each rank. Otherwise,
-            an empty list.
+        list: On destination rank, returns list of gathered data from each rank.
+        On other ranks, returns empty list.
     """
     if get_world_size() == 1:
         return [data]
@@ -157,11 +198,16 @@ def gather(data, dst=0, group=None):
 
 def shared_random_seed():
     """
+    Generate a random seed that is shared across all distributed processes.
+
+    This is useful when all workers need to use the same random seed for
+    reproducibility in distributed training.
+
     Returns:
-        int: a random number that is the same across all workers.
-        If workers need a shared RNG, they can use this shared seed to
-        create one.
-    All workers must call this function, otherwise it will deadlock.
+        int: A random seed that is the same across all workers.
+
+    Note:
+        All workers must call this function, otherwise it will deadlock.
     """
     ints = np.random.randint(2**31)
     all_ints = all_gather(ints)
@@ -170,13 +216,19 @@ def shared_random_seed():
 
 def reduce_dict(input_dict, average=True):
     """
-    Reduce the values in the dictionary from all processes so that process with rank
-    0 has the reduced results.
+    Reduce dictionary values from all processes to process with rank 0.
+
     Args:
-        input_dict (dict): inputs to be reduced. All the values must be scalar CUDA Tensor.
-        average (bool): whether to do average or sum
+        input_dict (dict): Dictionary where values are scalar CUDA tensors to be reduced.
+        average (bool, optional): Whether to average or sum the values. Defaults to True.
+
     Returns:
-        a dict with the same keys as input_dict, after reduction.
+        dict: On rank 0, dictionary with same keys as input_dict but with reduced values.
+        Values are averaged across processes if average=True, otherwise summed.
+
+    Note:
+        - Only process with rank 0 will have the reduced values
+        - All values in input_dict must be scalar CUDA tensors
     """
     world_size = get_world_size()
     if world_size < 2:

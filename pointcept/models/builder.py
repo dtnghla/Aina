@@ -12,5 +12,14 @@ MODULES = Registry("modules")
 
 
 def build_model(cfg):
-    """Build models."""
+    """
+    Build a model from configuration.
+
+    Args:
+        cfg (dict): Configuration dictionary containing model specifications.
+                   Must include 'type' key specifying the model type.
+
+    Returns:
+        nn.Module: Instantiated model based on the configuration.
+    """
     return MODELS.build(cfg)

@@ -12,6 +12,18 @@ import torch
 
 
 def to_numpy(x):
+    """
+    Convert PyTorch tensor to numpy array safely.
+
+    Args:
+        x (torch.Tensor or numpy.ndarray): Input tensor or array.
+
+    Returns:
+        numpy.ndarray: Numpy array version of the input.
+
+    Raises:
+        AssertionError: If input cannot be converted to numpy array.
+    """
     if isinstance(x, torch.Tensor):
         x = x.clone().detach().cpu().numpy()
     assert isinstance(x, np.ndarray)
@@ -19,6 +31,16 @@ def to_numpy(x):
 
 
 def save_point_cloud(coord, color=None, file_path="pc.ply", logger=None):
+    """
+    Save point cloud data to a PLY file.
+
+    Args:
+        coord (torch.Tensor or numpy.ndarray): Point coordinates of shape (N, 3).
+        color (torch.Tensor or numpy.ndarray, optional): Point colors of shape (N, 3).
+            If None, white color is used. Defaults to None.
+        file_path (str, optional): Path to save the PLY file. Defaults to "pc.ply".
+        logger (logging.Logger, optional): Logger for output messages. Defaults to None.
+    """
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     coord = to_numpy(coord)
     if color is not None:
@@ -36,6 +58,20 @@ def save_point_cloud(coord, color=None, file_path="pc.ply", logger=None):
 def save_bounding_boxes(
     bboxes_corners, color=(1.0, 0.0, 0.0), file_path="bbox.ply", logger=None
 ):
+    """
+    Save 3D bounding boxes to a PLY file.
+
+    Args:
+        bboxes_corners (torch.Tensor or numpy.ndarray): Corners of bounding boxes
+            of shape (N, 8, 3), where N is number of boxes.
+        color (tuple, optional): RGB color for the boxes. Defaults to (1.0, 0.0, 0.0).
+        file_path (str, optional): Path to save the PLY file. Defaults to "bbox.ply".
+        logger (logging.Logger, optional): Logger for output messages. Defaults to None.
+
+    Note:
+        Each bounding box is defined by 8 corners in the order specified by the line
+        connections in box_lines.
+    """
     bboxes_corners = to_numpy(bboxes_corners)
     # point list
     points = bboxes_corners.reshape(-1, 3)
@@ -76,6 +112,17 @@ def save_bounding_boxes(
 def save_lines(
     points, lines, color=(1.0, 0.0, 0.0), file_path="lines.ply", logger=None
 ):
+    """
+    Save line segments to a PLY file.
+
+    Args:
+        points (torch.Tensor or numpy.ndarray): Point coordinates of shape (N, 3).
+        lines (torch.Tensor or numpy.ndarray): Line segment indices of shape (M, 2),
+            where each row contains indices of two points forming a line.
+        color (tuple, optional): RGB color for the lines. Defaults to (1.0, 0.0, 0.0).
+        file_path (str, optional): Path to save the PLY file. Defaults to "lines.ply".
+        logger (logging.Logger, optional): Logger for output messages. Defaults to None.
+    """
     points = to_numpy(points)
     lines = to_numpy(lines)
     colors = np.array([color for _ in range(len(lines))])

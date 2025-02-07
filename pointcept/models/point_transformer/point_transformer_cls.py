@@ -15,7 +15,36 @@ from pointcept.models.builder import MODELS
 
 
 class PointTransformerCls(nn.Module):
+    """
+    Point Transformer V1 for Object Classification.
+    
+    This model implements a hierarchical point transformer architecture for point cloud
+    classification. It consists of multiple encoder blocks that progressively downsample
+    the point cloud while learning hierarchical features.
+    
+    Args:
+        block (nn.Module): Basic block module for transformer
+        blocks (list): Number of blocks in each encoder stage
+        in_channels (int, optional): Number of input channels. Defaults to 6
+        num_classes (int, optional): Number of output classes. Defaults to 40
+    
+    Attributes:
+        in_channels (int): Number of input channels
+        in_planes (int): Input feature dimension
+        enc1-5 (nn.Module): Encoder stages 1-5
+        cls (nn.Sequential): Classification head
+    """
+
     def __init__(self, block, blocks, in_channels=6, num_classes=40):
+        """
+        Initialize Point Transformer for classification.
+
+        Args:
+            block (nn.Module): Basic block module for transformer
+            blocks (list): Number of blocks in each encoder stage
+            in_channels (int, optional): Number of input channels. Defaults to 6
+            num_classes (int, optional): Number of output classes. Defaults to 40
+        """
         super().__init__()
         self.in_channels = in_channels
         self.in_planes, planes = in_channels, [32, 64, 128, 256, 512]
@@ -74,6 +103,20 @@ class PointTransformerCls(nn.Module):
         )
 
     def _make_enc(self, block, planes, blocks, share_planes=8, stride=1, nsample=16):
+        """
+        Create an encoder stage with multiple transformer blocks.
+        
+        Args:
+            block (nn.Module): Basic block module for transformer
+            planes (int): Number of output channels
+            blocks (int): Number of blocks in this stage
+            share_planes (int, optional): Number of shared planes. Defaults to 8
+            stride (int, optional): Stride for downsampling. Defaults to 1
+            nsample (int, optional): Number of samples in local neighborhood. Defaults to 16
+            
+        Returns:
+            nn.Sequential: Sequential container of encoder blocks
+        """
         layers = [
             TransitionDown(self.in_planes, planes * block.expansion, stride, nsample)
         ]
@@ -85,6 +128,18 @@ class PointTransformerCls(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, data_dict):
+        """
+        Forward pass of the Point Transformer.
+        
+        Args:
+            data_dict (dict): Input dictionary containing:
+                - coord (torch.Tensor): Point coordinates
+                - feat (torch.Tensor): Point features
+                - offset (torch.Tensor): Batch offsets
+                
+        Returns:
+            torch.Tensor: Classification logits of shape [B, num_classes]
+        """
         p0 = data_dict["coord"]
         x0 = data_dict["feat"]
         o0 = data_dict["offset"].int()
@@ -109,6 +164,15 @@ class PointTransformerCls(nn.Module):
 
 @MODELS.register_module("PointTransformer-Cls26")
 class PointTransformerCls26(PointTransformerCls):
+    """
+    Point Transformer with 26 layers for classification.
+    
+    This variant uses 1 block in each encoder stage, resulting in a total of 26 layers.
+    
+    Args:
+        **kwargs: Additional arguments passed to parent class
+    """
+
     def __init__(self, **kwargs):
         super(PointTransformerCls26, self).__init__(
             Bottleneck, [1, 1, 1, 1, 1], **kwargs
@@ -117,6 +181,15 @@ class PointTransformerCls26(PointTransformerCls):
 
 @MODELS.register_module("PointTransformer-Cls38")
 class PointTransformerCls38(PointTransformerCls):
+    """
+    Point Transformer with 38 layers for classification.
+    
+    This variant uses 2 blocks in each encoder stage (except first), resulting in a total of 38 layers.
+    
+    Args:
+        **kwargs: Additional arguments passed to parent class
+    """
+
     def __init__(self, **kwargs):
         super(PointTransformerCls38, self).__init__(
             Bottleneck, [1, 2, 2, 2, 2], **kwargs
@@ -125,6 +198,16 @@ class PointTransformerCls38(PointTransformerCls):
 
 @MODELS.register_module("PointTransformer-Cls50")
 class PointTransformerCls50(PointTransformerCls):
+    """
+    Point Transformer with 50 layers for classification.
+    
+    This variant uses varying numbers of blocks in each encoder stage,
+    resulting in a total of 50 layers.
+    
+    Args:
+        **kwargs: Additional arguments passed to parent class
+    """
+
     def __init__(self, **kwargs):
         super(PointTransformerCls50, self).__init__(
             Bottleneck, [1, 2, 3, 5, 2], **kwargs

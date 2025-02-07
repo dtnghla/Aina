@@ -11,6 +11,22 @@ os.environ["OPT"] = " ".join(
 
 
 def _argparse(pattern, argv, is_flag=True, is_list=False):
+    """
+    Parse command line arguments based on a pattern.
+    
+    Args:
+        pattern (str): The pattern to search for in the arguments.
+        argv (list): List of command line arguments.
+        is_flag (bool, optional): If True, treats the pattern as a flag argument. Defaults to True.
+        is_list (bool, optional): If True, parses the value as a comma-separated list. Defaults to False.
+    
+    Returns:
+        tuple: A pair containing:
+            - If is_flag=True: (bool, list) where bool indicates if pattern was found
+            - If is_flag=False and is_list=True: (list, list) where first list contains parsed values
+            - If is_flag=False and is_list=False: (str, list) where str is the parsed value
+            The second element is always the modified argv list with parsed arguments removed.
+    """
     if is_flag:
         found = pattern in argv
         if found:

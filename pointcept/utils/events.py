@@ -1,8 +1,28 @@
 """
 Events Utils
 
-Modified from Detectron2
+This module provides a comprehensive event logging and storage system for tracking training metrics,
+visualizations, and other data during model training. It is modified from Detectron2's event system
+to provide robust logging capabilities.
 
+Features:
+- Centralized event storage with context management
+- Multiple output formats (JSON, TensorBoard)
+- Support for scalars, images, and histograms
+- Smoothing and statistics calculation
+- ETA estimation and progress tracking
+- Exception handling and logging
+
+Components:
+- EventStorage: Central storage for all events and metrics
+- EventWriter: Base class for different output formats
+- JSONWriter: Writes metrics to JSON files
+- TensorboardXWriter: Writes to TensorBoard
+- CommonMetricPrinter: Prints metrics to console
+- HistoryBuffer: Stores historical values with statistics
+- ExceptionWriter: Handles and logs exceptions
+
+Modified from Detectron2
 Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
 Please cite our work if the code is helpful to you.
 """
@@ -34,10 +54,21 @@ _CURRENT_STORAGE_STACK = []
 
 
 def get_event_storage():
-    """
+    """Get the current EventStorage instance.
+    
+    This function provides access to the active EventStorage instance. It must be called
+    within an EventStorage context manager.
+    
     Returns:
-        The :class:`EventStorage` object that's currently being used.
-        Throws an error if no :class:`EventStorage` is currently enabled.
+        EventStorage: The currently active EventStorage instance.
+    
+    Raises:
+        AssertionError: If called outside an EventStorage context.
+    
+    Example:
+        >>> with EventStorage() as storage:
+        ...     storage = get_event_storage()
+        ...     storage.put_scalar("loss", 0.5)
     """
     assert len(
         _CURRENT_STORAGE_STACK
@@ -46,69 +77,62 @@ def get_event_storage():
 
 
 class EventWriter:
-    """
-    Base class for writers that obtain events from :class:`EventStorage` and process them.
+    """Base class for writers that process events from EventStorage.
+    
+    This is an abstract base class that defines the interface for event writers.
+    Subclasses should implement the write() method to process events in their
+    specific format.
     """
 
     def write(self):
+        """Process and write events from the current storage.
+        
+        This method should be implemented by subclasses to write events in their
+        specific format (e.g., JSON, TensorBoard).
+        """
         raise NotImplementedError
 
     def close(self):
+        """Clean up resources used by the writer.
+        
+        This method should be implemented by subclasses if they need to perform
+        cleanup operations when the writer is no longer needed.
+        """
         pass
 
 
 class JSONWriter(EventWriter):
+    """Write scalars to a JSON file.
+    
+    This writer saves metrics as one JSON object per line for easy parsing.
+    Each line contains metrics for a single iteration, including the iteration
+    number and all scalar values recorded for that iteration.
+    
+    The writer supports median smoothing of values over a specified window size
+    for metrics that have smoothing_hint=True.
+    
+    Args:
+        json_file (str): Path to the output JSON file. New data will be appended
+            if the file exists.
+        window_size (int): Window size for median smoothing of scalars with
+            smoothing_hint=True. Default: 20.
+    
+    Example JSON format:
+        {"iteration": 1, "loss": 1.0, "accuracy": 0.8}
+        {"iteration": 2, "loss": 0.9, "accuracy": 0.85}
     """
-    Write scalars to a json file.
-    It saves scalars as one json per line (instead of a big json) for easy parsing.
-    Examples parsing such a json file:
-    ::
-        $ cat metrics.json | jq -s '.[0:2]'
-        [
-          {
-            "data_time": 0.008433341979980469,
-            "iteration": 19,
-            "loss": 1.9228371381759644,
-            "loss_box_reg": 0.050025828182697296,
-            "loss_classifier": 0.5316952466964722,
-            "loss_mask": 0.7236229181289673,
-            "loss_rpn_box": 0.0856662318110466,
-            "loss_rpn_cls": 0.48198649287223816,
-            "lr": 0.007173333333333333,
-            "time": 0.25401854515075684
-          },
-          {
-            "data_time": 0.007216215133666992,
-            "iteration": 39,
-            "loss": 1.282649278640747,
-            "loss_box_reg": 0.06222952902317047,
-            "loss_classifier": 0.30682939291000366,
-            "loss_mask": 0.6970193982124329,
-            "loss_rpn_box": 0.038663312792778015,
-            "loss_rpn_cls": 0.1471673548221588,
-            "lr": 0.007706666666666667,
-            "time": 0.2490077018737793
-          }
-        ]
-        $ cat metrics.json | jq '.loss_mask'
-        0.7126231789588928
-        0.689423680305481
-        0.6776131987571716
-        ...
-    """
-
+    
     def __init__(self, json_file, window_size=20):
-        """
-        Args:
-            json_file (str): path to the json file. New data will be appended if the file exists.
-            window_size (int): the window size of median smoothing for the scalars whose
-                `smoothing_hint` are True.
-        """
         self._file_handle = open(json_file, "a")
         self._window_size = window_size
         self._last_write = -1
 
     def write(self):
+        """Write all new scalar values to the JSON file.
+        
+        Retrieves all scalar values from the current storage that haven't been
+        written yet and writes them as JSON objects, one per line.
+        """
         storage = get_event_storage()
         to_save = defaultdict(dict)
 
@@ -133,21 +157,29 @@ class JSONWriter(EventWriter):
             pass
 
     def close(self):
+        """Close the JSON file handle."""
         self._file_handle.close()
 
 
 class TensorboardXWriter(EventWriter):
+    """Write scalars, images, and histograms to TensorBoard.
+    
+    This writer supports writing multiple types of data to TensorBoard:
+    - Scalar values (with optional smoothing)
+    - Images
+    - Histograms
+    
+    Args:
+        log_dir (str): Directory where TensorBoard events will be written
+        window_size (int): Window size for median smoothing of scalars.
+            Default: 20.
+        **kwargs: Additional arguments passed to torch.utils.tensorboard.SummaryWriter
+    
+    Note:
+        This writer requires the torch.utils.tensorboard package to be installed.
     """
-    Write all scalars to a tensorboard file.
-    """
-
+    
     def __init__(self, log_dir: str, window_size: int = 20, **kwargs):
-        """
-        Args:
-            log_dir (str): the directory to save the output events
-            window_size (int): the scalars will be median-smoothed by this window size
-            kwargs: other arguments passed to `torch.utils.tensorboard.SummaryWriter(...)`
-        """
         self._window_size = window_size
         from torch.utils.tensorboard import SummaryWriter
 
@@ -155,6 +187,13 @@ class TensorboardXWriter(EventWriter):
         self._last_write = -1
 
     def write(self):
+        """Write all pending data to TensorBoard.
+        
+        This includes:
+        - Scalar values (with smoothing if enabled)
+        - Images stored in storage._vis_data
+        - Histograms stored in storage._histograms
+        """
         storage = get_event_storage()
         new_last_write = self._last_write
         for k, (v, iter) in storage.latest_with_smoothing_hint(
@@ -183,17 +222,26 @@ class TensorboardXWriter(EventWriter):
             storage.clear_histograms()
 
     def close(self):
+        """Close the TensorBoard writer."""
         if hasattr(self, "_writer"):  # doesn't exist when the code fails at import
             self._writer.close()
 
 
 class CommonMetricPrinter(EventWriter):
-    """
-    Print **common** metrics to the terminal, including
-    iteration time, ETA, memory, all losses, and the learning rate.
-    It also applies smoothing using a window of 20 elements.
-    It's meant to print common metrics in common ways.
-    To print something in more customized ways, please implement a similar printer by yourself.
+    """Print common training metrics to the terminal.
+    
+    This printer outputs common training metrics including:
+    - Iteration time
+    - ETA (estimated time of arrival)
+    - Memory usage
+    - All losses
+    - Learning rate
+    
+    It applies median smoothing over a window of values for stability.
+    
+    Args:
+        max_iter (int, optional): Maximum number of iterations. Used to compute ETA.
+        window_size (int): Window size for smoothing. Default: 20.
     """
 
     def __init__(self, max_iter: Optional[int] = None, window_size: int = 20):
@@ -294,9 +342,27 @@ class CommonMetricPrinter(EventWriter):
 
 
 class EventStorage:
-    """
-    The user-facing class that provides metric storage functionalities.
-    In the future we may add support for storing / logging other types of data if needed.
+    """Central storage for training metrics and events.
+    
+    This class provides a centralized storage for training metrics, including:
+    - Scalar values (losses, learning rate, etc.)
+    - Images for visualization
+    - Histograms
+    
+    It supports:
+    - Automatic smoothing of values
+    - History tracking with statistics (median, average)
+    - Nested name scopes for metric organization
+    - Context management for safe storage access
+    
+    Args:
+        start_iter (int): Starting iteration number. Default: 0.
+    
+    Example:
+        >>> with EventStorage() as storage:
+        ...     storage.put_scalar("loss", 0.5)
+        ...     with storage.name_scope("validation"):
+        ...         storage.put_scalar("accuracy", 0.95)
     """
 
     def __init__(self, start_iter=0):
@@ -531,9 +597,21 @@ class AverageMeter:
 
 
 class HistoryBuffer:
-    """
-    Track a series of scalar values and provide access to smoothed values over a
-    window or the global average of the series.
+    """Buffer for storing historical values with statistical operations.
+    
+    This class maintains a buffer of historical values and provides various
+    statistical operations like median, average, and global average.
+    
+    Args:
+        max_length (int): Maximum number of values to store. Default: 1000000.
+    
+    Methods:
+        update(value, iteration): Add a new value to the buffer
+        median(window_size): Get median of recent values
+        avg(window_size): Get average of recent values
+        global_avg(): Get average of all values
+        latest(): Get most recent value
+        values(): Get all stored values and iterations
     """
 
     def __init__(self, max_length: int = 1000000) -> None:
@@ -597,6 +675,17 @@ class HistoryBuffer:
 
 
 class ExceptionWriter:
+    """Context manager for handling and logging exceptions.
+    
+    This class provides a context manager that catches and logs any exceptions
+    that occur within its scope. It's useful for debugging and error tracking
+    during training.
+    
+    Example:
+        >>> with ExceptionWriter():
+        ...     # Code that might raise an exception
+        ...     raise ValueError("Example error")
+    """
 
     def __init__(self):
         self.logger = logging.getLogger(__name__)

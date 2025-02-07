@@ -15,6 +15,27 @@ from pointcept.models.builder import MODELS, build_model
 
 @MODELS.register_module("CAC-v1m1")
 class CACSegmentor(nn.Module):
+    """
+    Context-aware Classifier for Semantic Segmentation.
+    
+    This model implements a context-aware classifier that leverages both local and global
+    context for point cloud semantic segmentation. It consists of a backbone network,
+    a segmentation head, and multiple projection layers for feature enhancement.
+    
+    Args:
+        num_classes (int): Number of semantic classes
+        backbone_out_channels (int): Output channel dimension from backbone
+        backbone (dict, optional): Configuration for backbone network
+        criteria (dict, optional): Configuration for loss functions
+        cos_temp (float, optional): Temperature for cosine similarity. Defaults to 15
+        main_weight (float, optional): Weight for main loss. Defaults to 1
+        pre_weight (float, optional): Weight for pre-training loss. Defaults to 1
+        pre_self_weight (float, optional): Weight for self pre-training loss. Defaults to 1
+        kl_weight (float, optional): Weight for KL divergence loss. Defaults to 1
+        conf_thresh (float, optional): Confidence threshold. Defaults to 0
+        detach_pre_logits (bool, optional): Whether to detach pre-training logits. Defaults to False
+    """
+
     def __init__(
         self,
         num_classes,
@@ -29,6 +50,22 @@ class CACSegmentor(nn.Module):
         conf_thresh=0,
         detach_pre_logits=False,
     ):
+        """
+        Initialize the Context-aware Classifier.
+
+        Args:
+            num_classes (int): Number of semantic classes
+            backbone_out_channels (int): Output channel dimension from backbone
+            backbone (dict, optional): Configuration for backbone network
+            criteria (dict, optional): Configuration for loss functions
+            cos_temp (float, optional): Temperature for cosine similarity. Defaults to 15
+            main_weight (float, optional): Weight for main loss. Defaults to 1
+            pre_weight (float, optional): Weight for pre-training loss. Defaults to 1
+            pre_self_weight (float, optional): Weight for self pre-training loss. Defaults to 1
+            kl_weight (float, optional): Weight for KL divergence loss. Defaults to 1
+            conf_thresh (float, optional): Confidence threshold. Defaults to 0
+            detach_pre_logits (bool, optional): Whether to detach pre-training logits. Defaults to False
+        """
         super().__init__()
         self.num_classes = num_classes
         self.cos_temp = cos_temp
@@ -64,6 +101,16 @@ class CACSegmentor(nn.Module):
 
     @staticmethod
     def get_pred(x, proto):
+        """
+        Get prediction logits using cosine similarity between features and prototypes.
+        
+        Args:
+            x (torch.Tensor): Input features of shape [N, C]
+            proto (torch.Tensor): Prototype features of shape [num_classes, C]
+            
+        Returns:
+            torch.Tensor: Prediction logits of shape [N, num_classes]
+        """
         # x: [n,c]; proto: [cls, c]
         x = F.normalize(x, 2, 1)
         proto = F.normalize(proto, 2, 1)
@@ -71,6 +118,18 @@ class CACSegmentor(nn.Module):
         return pred
 
     def get_adaptive_perspective(self, feat, target, new_proto, proto):
+        """
+        Get predictions from an adaptive perspective by combining class-specific prototypes.
+        
+        Args:
+            feat (torch.Tensor): Input features of shape [N, C]
+            target (torch.Tensor): Ground truth labels of shape [N]
+            new_proto (torch.Tensor): New prototype features of shape [num_classes, C]
+            proto (torch.Tensor): Original prototype features of shape [num_classes, C]
+            
+        Returns:
+            torch.Tensor: Prediction logits from adaptive perspective
+        """
         raw_feat = feat.clone()
         # target: [n]
         # feat: [n,c]
@@ -96,6 +155,18 @@ class CACSegmentor(nn.Module):
         return pred
 
     def post_refine_proto_batch(self, feat, pred, proto, offset=None):
+        """
+        Refine prototypes using batch-wise processing.
+        
+        Args:
+            feat (torch.Tensor): Input features of shape [N, C]
+            pred (torch.Tensor): Initial predictions of shape [N, num_classes]
+            proto (torch.Tensor): Prototype features of shape [num_classes, C]
+            offset (torch.Tensor, optional): Batch offsets. Defaults to None
+            
+        Returns:
+            torch.Tensor: Refined prediction logits
+        """
         # x: [n, c]; pred: [n, cls]; proto: [cls, c]
         pred_list = []
         x = feat
@@ -152,7 +223,17 @@ class CACSegmentor(nn.Module):
     @staticmethod
     def get_distill_loss(pred, soft, target, smoothness=0.5, eps=0):
         """
-        knowledge distillation loss
+        Calculate knowledge distillation loss between predictions and soft targets.
+        
+        Args:
+            pred (torch.Tensor): Model predictions of shape [N, num_classes]
+            soft (torch.Tensor): Soft targets of shape [N, num_classes]
+            target (torch.Tensor): Ground truth labels of shape [N]
+            smoothness (float, optional): Label smoothing factor. Defaults to 0.5
+            eps (float, optional): Small epsilon for numerical stability. Defaults to 0
+            
+        Returns:
+            torch.Tensor: Knowledge distillation loss
         """
         n, c = soft.shape[:]
         soft = soft.detach()
@@ -199,6 +280,17 @@ class CACSegmentor(nn.Module):
         return loss
 
     def forward(self, data_dict):
+        """
+        Forward pass of the model.
+        
+        Args:
+            data_dict (dict): Input data dictionary containing:
+                - offset: Batch offsets
+                - segment: Ground truth segmentation labels (training only)
+                
+        Returns:
+            dict: Dictionary containing loss terms during training or predictions during inference
+        """
         offset = data_dict["offset"]
         point = self.backbone(data_dict)
         if isinstance(point, Point):

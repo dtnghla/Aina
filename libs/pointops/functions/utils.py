@@ -12,6 +12,23 @@ def knn_query_and_group(
     nsample=None,
     with_xyz=False,
 ):
+    """
+    Performs k-nearest neighbor query and groups features.
+
+    Args:
+        feat (torch.Tensor): Input features.
+        xyz (torch.Tensor): Input coordinates (n, 3).
+        offset (torch.Tensor, optional): Batch offsets. Defaults to None.
+        new_xyz (torch.Tensor, optional): New coordinates for sampling. Defaults to None.
+        new_offset (torch.Tensor, optional): New batch offsets. Defaults to None.
+        idx (torch.Tensor, optional): Precomputed indices. Defaults to None.
+        nsample (int, optional): Number of samples. Required if idx is None.
+        with_xyz (bool, optional): Whether to include coordinates in output. Defaults to False.
+
+    Returns:
+        tuple: (grouped_features, indices) where grouped_features contains the grouped features
+        and indices contains the neighbor indices.
+    """
     if idx is None:
         assert nsample is not None
         idx, _ = knn_query(nsample, xyz, offset, new_xyz, new_offset)
@@ -30,6 +47,25 @@ def ball_query_and_group(
     nsample=None,
     with_xyz=False,
 ):
+    """
+    Performs ball query and groups features within specified radius.
+
+    Args:
+        feat (torch.Tensor): Input features.
+        xyz (torch.Tensor): Input coordinates (n, 3).
+        offset (torch.Tensor, optional): Batch offsets. Defaults to None.
+        new_xyz (torch.Tensor, optional): New coordinates for sampling. Defaults to None.
+        new_offset (torch.Tensor, optional): New batch offsets. Defaults to None.
+        idx (torch.Tensor, optional): Precomputed indices. Defaults to None.
+        max_radio (float, optional): Maximum radius for ball query. Required if idx is None.
+        min_radio (float, optional): Minimum radius for ball query. Defaults to 0.
+        nsample (int, optional): Number of samples. Required if idx is None.
+        with_xyz (bool, optional): Whether to include coordinates in output. Defaults to False.
+
+    Returns:
+        tuple: (grouped_features, indices) where grouped_features contains the grouped features
+        and indices contains the neighbor indices.
+    """
     if idx is None:
         assert nsample is not None and offset is not None
         assert max_radio is not None and min_radio is not None
@@ -52,8 +88,24 @@ def query_and_group(
     with_xyz=True,
 ):
     """
-    input: coords: (n, 3), new_xyz: (m, 3), color: (n, c), idx: (m, nsample), offset: (b), new_offset: (b)
-    output: new_feat: (m, nsample, c+3), grouped_idx: (m, nsample)
+    Query points and group features with optional dilation.
+
+    Args:
+        nsample (int): Number of samples per group.
+        xyz (torch.Tensor): Input coordinates (n, 3).
+        new_xyz (torch.Tensor): New coordinates (m, 3).
+        feat (torch.Tensor): Input features (n, c).
+        idx (torch.Tensor): Indices for grouping (m, nsample).
+        offset (torch.Tensor): Batch offsets.
+        new_offset (torch.Tensor): New batch offsets.
+        dilation (int, optional): Dilation rate for sampling. Defaults to 0.
+        with_feat (bool, optional): Whether to include features in output. Defaults to True.
+        with_xyz (bool, optional): Whether to include coordinates in output. Defaults to True.
+
+    Returns:
+        tuple: If with_feat is True, returns (grouped_features, indices) where grouped_features
+        contains the grouped features (and coordinates if with_xyz is True) and indices contains
+        the neighbor indices. If with_feat is False, returns only indices.
     """
     assert xyz.is_contiguous() and new_xyz.is_contiguous() and feat.is_contiguous()
     if new_xyz is None:
@@ -100,6 +152,15 @@ def query_and_group(
 
 
 def offset2batch(offset):
+    """
+    Convert offset-based batch representation to index-based batch representation.
+
+    Args:
+        offset (torch.Tensor): Tensor containing cumulative sizes of batches.
+
+    Returns:
+        torch.Tensor: Tensor containing batch indices for each point.
+    """
     return (
         torch.cat(
             [
@@ -118,4 +179,13 @@ def offset2batch(offset):
 
 
 def batch2offset(batch):
+    """
+    Convert index-based batch representation to offset-based batch representation.
+
+    Args:
+        batch (torch.Tensor): Tensor containing batch indices for each point.
+
+    Returns:
+        torch.Tensor: Tensor containing cumulative sizes of batches.
+    """
     return torch.cumsum(batch.bincount(), dim=0).int()

@@ -1,4 +1,22 @@
-# Copyright (c) OpenMMLab. All rights reserved.
+"""
+Registry Module
+
+This module provides a flexible registry system for managing and building classes
+dynamically. It supports hierarchical registration with parent-child relationships,
+scoped registries, and dynamic class instantiation from configuration dictionaries.
+
+Features:
+- Dynamic class registration and instantiation
+- Hierarchical registry structure with inheritance
+- Scope-based module organization
+- Configuration-based object building
+- Decorator-based registration
+- Automatic scope inference
+- Support for multiple names per class
+
+Originally from OpenMMLab. Modified for use in Pointcept.
+"""
+
 import inspect
 import warnings
 from functools import partial
@@ -7,15 +25,36 @@ from .misc import is_seq_of
 
 
 def build_from_cfg(cfg, registry, default_args=None):
-    """Build a module from configs dict.
-
+    """Build a module instance from a configuration dictionary.
+    
+    This function creates an instance of a registered class based on the provided
+    configuration. It supports both direct class references and string-based type
+    specifications.
+    
     Args:
-        cfg (dict): Config dict. It should at least contain the key "type".
-        registry (:obj:`Registry`): The registry to search the type from.
-        default_args (dict, optional): Default initialization arguments.
-
+        cfg (dict): Configuration dict containing:
+            - type: Class name or reference
+            - other arguments passed to class constructor
+        registry (Registry): Registry containing registered classes
+        default_args (dict, optional): Default arguments for class instantiation,
+            will be overridden by cfg. Default: None.
+    
     Returns:
-        object: The constructed object.
+        object: Instantiated object of the specified class.
+    
+    Raises:
+        TypeError: If cfg or registry is of wrong type
+        KeyError: If required type field is missing
+        KeyError: If specified type is not found in registry
+    
+    Example:
+        >>> MODELS = Registry('models')
+        >>> @MODELS.register_module()
+        >>> class MyModel:
+        >>>     def __init__(self, arg1, arg2):
+        >>>         pass
+        >>> cfg = dict(type='MyModel', arg1=1, arg2=2)
+        >>> model = build_from_cfg(cfg, MODELS)
     """
     if not isinstance(cfg, dict):
         raise TypeError(f"cfg must be a dict, but got {type(cfg)}")
@@ -57,33 +96,45 @@ def build_from_cfg(cfg, registry, default_args=None):
 
 
 class Registry:
-    """A registry to map strings to classes.
-
-    Registered object could be built from registry.
+    """A hierarchical registry for managing classes and their relationships.
+    
+    This registry system provides a way to:
+    1. Register classes with string identifiers
+    2. Build class instances from configurations
+    3. Organize classes in a hierarchical structure
+    4. Support scoped access to registered classes
+    
+    The registry supports parent-child relationships, allowing child registries
+    to inherit from parent registries while maintaining their own scope.
+    
+    Args:
+        name (str): Registry name for identification
+        build_func (callable, optional): Custom build function for instantiation.
+            Defaults to build_from_cfg if neither parent nor build_func specified.
+        parent (Registry, optional): Parent registry to inherit from. Default: None.
+        scope (str, optional): Registry scope for hierarchical organization.
+            Defaults to package name where registry is defined.
+    
     Example:
+        >>> # Create a base registry
         >>> MODELS = Registry('models')
+        >>> 
+        >>> # Register a class
         >>> @MODELS.register_module()
         >>> class ResNet:
         >>>     pass
-        >>> resnet = MODELS.build(dict(type='ResNet'))
-
-    Please refer to
-    https://mmcv.readthedocs.io/en/latest/understand_mmcv/registry.html for
-    advanced usage.
-
-    Args:
-        name (str): Registry name.
-        build_func(func, optional): Build function to construct instance from
-            Registry, func:`build_from_cfg` is used if neither ``parent`` or
-            ``build_func`` is specified. If ``parent`` is specified and
-            ``build_func`` is not given,  ``build_func`` will be inherited
-            from ``parent``. Default: None.
-        parent (Registry, optional): Parent registry. The class registered in
-            children registry could be built from parent. Default: None.
-        scope (str, optional): The scope of registry. It is the key to search
-            for children registry. If not specified, scope will be the name of
-            the package where class is defined, e.g. mmdet, mmcls, mmseg.
-            Default: None.
+        >>> 
+        >>> # Create a child registry
+        >>> BACKBONES = Registry('backbones', parent=MODELS)
+        >>> 
+        >>> # Build an instance
+        >>> model = MODELS.build(dict(type='ResNet'))
+    
+    Note:
+        The registry supports multiple registration methods:
+        1. Decorator: @registry.register_module()
+        2. Direct registration: registry.register_module(module_class)
+        3. Named registration: registry.register_module(name='alias')
     """
 
     def __init__(self, name, build_func=None, parent=None, scope=None):
@@ -111,12 +162,22 @@ class Registry:
             self.parent = None
 
     def __len__(self):
+        """Return the number of registered modules."""
         return len(self._module_dict)
 
     def __contains__(self, key):
+        """Check if a class is registered.
+        
+        Args:
+            key (str): Class name to check
+        
+        Returns:
+            bool: True if class is registered, False otherwise
+        """
         return self.get(key) is not None
 
     def __repr__(self):
+        """Return a string representation of the registry."""
         format_str = (
             self.__class__.__name__ + f"(name={self._name}, "
             f"items={self._module_dict})"
@@ -125,43 +186,34 @@ class Registry:
 
     @staticmethod
     def infer_scope():
-        """Infer the scope of registry.
-
-        The name of the package where registry is defined will be returned.
-
-        Example:
-            # in mmdet/models/backbone/resnet.py
-            >>> MODELS = Registry('models')
-            >>> @MODELS.register_module()
-            >>> class ResNet:
-            >>>     pass
-            The scope of ``ResNet`` will be ``mmdet``.
-
-
+        """Infer the scope of the registry from its definition location.
+        
+        The scope is determined by the package name where the registry is defined.
+        For example, if defined in 'pointcept/models/backbone.py', the scope
+        will be 'pointcept'.
+        
         Returns:
-            scope (str): The inferred scope name.
+            str: Inferred scope name (package name)
         """
-        # inspect.stack() trace where this function is called, the index-2
-        # indicates the frame where `infer_scope()` is called
         filename = inspect.getmodule(inspect.stack()[2][0]).__name__
         split_filename = filename.split(".")
         return split_filename[0]
 
     @staticmethod
     def split_scope_key(key):
-        """Split scope and key.
-
-        The first scope will be split from key.
-
-        Examples:
+        """Split a key into scope and actual key parts.
+        
+        Args:
+            key (str): Full key possibly containing scope (e.g., 'mmdet.ResNet')
+        
+        Returns:
+            tuple: (scope, key) where scope may be None if not specified
+        
+        Example:
             >>> Registry.split_scope_key('mmdet.ResNet')
-            'mmdet', 'ResNet'
+            ('mmdet', 'ResNet')
             >>> Registry.split_scope_key('ResNet')
-            None, 'ResNet'
-
-        Return:
-            scope (str, None): The first scope.
-            key (str): The remaining key.
+            (None, 'ResNet')
         """
         split_index = key.find(".")
         if split_index != -1:
@@ -171,28 +223,42 @@ class Registry:
 
     @property
     def name(self):
+        """Registry name."""
         return self._name
 
     @property
     def scope(self):
+        """Registry scope."""
         return self._scope
 
     @property
     def module_dict(self):
+        """Dictionary of registered modules."""
         return self._module_dict
 
     @property
     def children(self):
+        """Dictionary of child registries."""
         return self._children
 
     def get(self, key):
-        """Get the registry record.
-
+        """Get a registered class by key.
+        
+        This method supports both scoped and unscoped access. For scoped access,
+        the key should be in the format 'scope.name' (e.g., 'mmdet.ResNet').
+        
         Args:
-            key (str): The class name in string format.
-
+            key (str): Class name to retrieve, optionally with scope
+        
         Returns:
-            class: The corresponding class.
+            type or None: Registered class or None if not found
+        
+        Example:
+            >>> MODELS = Registry('models')
+            >>> @MODELS.register_module()
+            >>> class ResNet: pass
+            >>> MODELS.get('ResNet')  # Returns ResNet class
+            >>> MODELS.get('mmdet.ResNet')  # Scoped access
         """
         scope, real_key = self.split_scope_key(key)
         if scope is None or scope == self._scope:
@@ -211,23 +277,38 @@ class Registry:
                 return parent.get(key)
 
     def build(self, *args, **kwargs):
+        """Build an instance of a registered class.
+        
+        This method delegates to the registry's build_func to create
+        an instance of a registered class based on the provided arguments.
+        
+        Args:
+            *args: Positional arguments passed to build_func
+            **kwargs: Keyword arguments passed to build_func
+        
+        Returns:
+            object: Instance of the specified class
+        """
         return self.build_func(*args, **kwargs, registry=self)
 
     def _add_children(self, registry):
-        """Add children for a registry.
-
-        The ``registry`` will be added as children based on its scope.
-        The parent registry could build objects from children registry.
-
+        """Add a child registry.
+        
+        Args:
+            registry (Registry): Child registry to add
+        
+        Raises:
+            AssertionError: If child scope already exists
+        
         Example:
             >>> models = Registry('models')
-            >>> mmdet_models = Registry('models', parent=models)
-            >>> @mmdet_models.register_module()
-            >>> class ResNet:
-            >>>     pass
-            >>> resnet = models.build(dict(type='mmdet.ResNet'))
+            >>> backbones = Registry('backbones', parent=models)
+            >>> # backbones is now a child of models
+        
+        Note:
+            Child registries inherit the build function from their parent
+            if not specified otherwise.
         """
-
         assert isinstance(registry, Registry)
         assert registry.scope is not None
         assert (
@@ -236,6 +317,19 @@ class Registry:
         self.children[registry.scope] = registry
 
     def _register_module(self, module_class, module_name=None, force=False):
+        """Internal method to register a module.
+        
+        Args:
+            module_class (type): Class to register
+            module_name (str or list[str], optional): Name(s) to register the class under.
+                Defaults to the class name.
+            force (bool, optional): Whether to override existing registration.
+                Default: False.
+        
+        Raises:
+            TypeError: If module_class is not a class
+            KeyError: If name is already registered and force=False
+        """
         if not inspect.isclass(module_class):
             raise TypeError("module must be a class, " f"but got {type(module_class)}")
 

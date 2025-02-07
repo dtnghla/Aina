@@ -5,11 +5,25 @@ from pointops._C import aggregation_forward_cuda, aggregation_backward_cuda
 
 
 class Aggregation(Function):
+    """
+    Custom autograd Function implementing feature aggregation for point clouds.
+    This class performs weighted aggregation of features based on spatial positions and indices.
+    """
+
     @staticmethod
     def forward(ctx, input, position, weight, idx):
         """
-        input: input: (n, c), position: (n, nsample, c), weight : (n, nsample, c'), idx: (n, nsample)
-        output: (n, c)
+        Forward pass of feature aggregation.
+
+        Args:
+            ctx: Context object for autograd.
+            input (torch.Tensor): Input features (n, c).
+            position (torch.Tensor): Position features (n, nsample, c).
+            weight (torch.Tensor): Weight features (n, nsample, c').
+            idx (torch.Tensor): Sample indices (n, nsample).
+
+        Returns:
+            torch.Tensor: Aggregated features (n, c).
         """
         assert (
             input.is_contiguous()
@@ -28,8 +42,18 @@ class Aggregation(Function):
     @staticmethod
     def backward(ctx, grad_output):
         """
-        input: grad_out: (n, c)
-        output: grad_input: (n, c), grad_position: (n, nsample, c), grad_weight : (n, nsample, c')
+        Backward pass of feature aggregation.
+
+        Args:
+            ctx: Context object for autograd.
+            grad_output (torch.Tensor): Gradient of the loss with respect to output (n, c).
+
+        Returns:
+            tuple: (grad_input, grad_position, grad_weight, None) containing gradients for:
+                - input: Input features (n, c)
+                - position: Position features (n, nsample, c)
+                - weight: Weight features (n, nsample, c')
+                - idx: No gradient for indices
         """
         input, position, weight, idx = ctx.saved_tensors
         n, nsample, c = position.shape

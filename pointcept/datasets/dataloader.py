@@ -1,3 +1,22 @@
+"""
+Multi-Dataset Dataloader
+
+This module provides functionality for loading data from multiple datasets
+simultaneously during training. It enables training on multiple datasets with
+different sampling ratios and batch sizes.
+
+Features:
+- Support for multiple datasets with different characteristics
+- Configurable sampling ratios between datasets
+- Distributed training support
+- Automatic worker initialization
+- Memory-efficient data loading
+- Mixed batch sampling
+
+Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
+Please cite our work if the code is helpful to you.
+"""
+
 from functools import partial
 import weakref
 import torch
@@ -10,10 +29,28 @@ from pointcept.utils.env import set_seed
 
 
 class MultiDatasetDummySampler:
+    """Dummy sampler for multi-dataset loading.
+    
+    This sampler provides compatibility with distributed training by
+    forwarding epoch information to the underlying dataset samplers.
+    It acts as a proxy between the dataloader and individual dataset samplers.
+    
+    Attributes:
+        dataloader: Weak reference to the parent dataloader
+    """
     def __init__(self):
         self.dataloader = None
 
     def set_epoch(self, epoch):
+        """Set the epoch for distributed sampling.
+        
+        Args:
+            epoch (int): Current epoch number
+            
+        Note:
+            This method is called by the training loop in distributed settings
+            to ensure proper shuffling of data across epochs.
+        """
         if comm.get_world_size() > 1:
             for dataloader in self.dataloader.dataloaders:
                 dataloader.sampler.set_epoch(epoch)
@@ -21,9 +58,36 @@ class MultiDatasetDummySampler:
 
 
 class MultiDatasetDataloader:
-    """
-    Multiple Datasets Dataloader, batch data from a same dataset and mix up ratio determined by loop of each sub dataset.
-    The overall length is determined by the main dataset (first) and loop of concat dataset.
+    """Dataloader for handling multiple datasets simultaneously.
+    
+    This dataloader enables training on multiple datasets with different sampling
+    ratios. It ensures that batches from each dataset are properly mixed according
+    to specified ratios while maintaining memory efficiency.
+    
+    The overall length is determined by the main dataset (first dataset) and the
+    loop parameter of the concat dataset. Batches are sampled from datasets
+    according to their specified ratios.
+    
+    Attributes:
+        datasets (list): List of dataset instances
+        ratios (list): Sampling ratios for each dataset
+        dataloaders (list): List of individual dataset dataloaders
+        sampler: Dummy sampler for distributed training compatibility
+        
+    Args:
+        concat_dataset (ConcatDataset): Combined dataset instance
+        batch_size_per_gpu (int): Batch size for each GPU
+        num_worker_per_gpu (int): Number of workers per GPU
+        mix_prob (float): Probability of mixing batches. Default: 0
+        seed (int, optional): Random seed for workers. Default: None
+        
+    Example:
+        >>> concat_dataset = ConcatDataset([dataset1, dataset2])
+        >>> dataloader = MultiDatasetDataloader(
+        ...     concat_dataset,
+        ...     batch_size_per_gpu=32,
+        ...     num_worker_per_gpu=4
+        ... )
     """
 
     def __init__(
@@ -80,6 +144,15 @@ class MultiDatasetDataloader:
         self.sampler.dataloader = weakref.proxy(self)
 
     def __iter__(self):
+        """Create an iterator over the datasets.
+        
+        This method implements the iteration logic that samples batches from
+        different datasets according to their ratios. It ensures that the
+        sampling follows the specified ratios while handling dataset exhaustion.
+        
+        Yields:
+            batch: A batch of data from one of the datasets
+        """
         iterator = [iter(dataloader) for dataloader in self.dataloaders]
         while True:
             for i in range(len(self.ratios)):
@@ -95,6 +168,14 @@ class MultiDatasetDataloader:
                     yield batch
 
     def __len__(self):
+        """Calculate the total length of the combined dataloader.
+        
+        The length is determined by the main dataset's length and the sampling
+        ratios of all datasets.
+        
+        Returns:
+            int: Total number of batches per epoch
+        """
         main_data_loader_length = len(self.dataloaders[0])
         return (
             main_data_loader_length // self.ratios[0] * sum(self.ratios)
@@ -103,6 +184,19 @@ class MultiDatasetDataloader:
 
     @staticmethod
     def _worker_init_fn(worker_id, num_workers, dataset_id, num_datasets, rank, seed):
+        """Initialize workers with appropriate random seeds.
+        
+        This method ensures that each worker has a unique random seed that is
+        consistent across epochs but different between workers and datasets.
+        
+        Args:
+            worker_id (int): ID of the current worker
+            num_workers (int): Total number of workers
+            dataset_id (int): ID of the current dataset
+            num_datasets (int): Total number of datasets
+            rank (int): Rank of the current process
+            seed (int): Base random seed
+        """
         worker_seed = (
             num_workers * num_datasets * rank
             + num_workers * dataset_id

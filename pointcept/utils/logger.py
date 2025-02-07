@@ -1,8 +1,26 @@
 """
 Logger Utils
 
-Modified from mmcv
+This module provides a comprehensive logging system for the Pointcept framework,
+with support for distributed training, colorful output, and multiple output destinations.
+Modified from mmcv to provide enhanced logging capabilities.
 
+Features:
+- Hierarchical logger management
+- Distributed training support with rank-aware logging
+- Colorful console output with warning and error highlighting
+- File-based logging with configurable modes
+- Silent mode support
+- API usage tracking
+
+Components:
+- _ColorfulFormatter: Custom formatter for colored console output
+- get_logger: Main function for obtaining configured loggers
+- print_log: Unified interface for logging messages
+- get_root_logger: Convenience function for root logger access
+- _log_api_usage: Internal function for API usage tracking
+
+Modified from mmcv
 Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
 Please cite our work if the code is helpful to you.
 """
@@ -18,11 +36,36 @@ root_status = 0
 
 
 class _ColorfulFormatter(logging.Formatter):
+    """Custom logging formatter that adds color to console output.
+    
+    This formatter adds color highlighting to warning and error messages,
+    making them more visible in the console output. It uses the termcolor
+    package for ANSI color formatting.
+    
+    Args:
+        *args: Arguments passed to logging.Formatter
+        **kwargs: Keyword arguments passed to logging.Formatter.
+            Must include 'root_name' which is used as the logger name prefix.
+    
+    Note:
+        - Warnings are displayed in blinking red
+        - Errors are displayed in blinking, underlined red
+        - Regular messages are displayed without color modification
+    """
+
     def __init__(self, *args, **kwargs):
         self._root_name = kwargs.pop("root_name") + "."
         super(_ColorfulFormatter, self).__init__(*args, **kwargs)
 
     def formatMessage(self, record):
+        """Format the log message with appropriate color if needed.
+        
+        Args:
+            record (LogRecord): The log record to format.
+        
+        Returns:
+            str: The formatted log message, potentially with color codes.
+        """
         log = super(_ColorfulFormatter, self).formatMessage(record)
         if record.levelno == logging.WARNING:
             prefix = colored("WARNING", "red", attrs=["blink"])
@@ -35,26 +78,33 @@ class _ColorfulFormatter(logging.Formatter):
 
 def get_logger(name, log_file=None, log_level=logging.INFO, file_mode="a", color=False):
     """Initialize and get a logger by name.
-
-    If the logger has not been initialized, this method will initialize the
-    logger by adding one or two handlers, otherwise the initialized logger will
-    be directly returned. During initialization, a StreamHandler will always be
-    added. If `log_file` is specified and the process rank is 0, a FileHandler
-    will also be added.
-
+    
+    This function provides a centralized way to obtain loggers with consistent
+    configuration. It supports both console and file output, with special handling
+    for distributed training environments.
+    
     Args:
-        name (str): Logger name.
-        log_file (str | None): The log filename. If specified, a FileHandler
-            will be added to the logger.
-        log_level (int): The logger level. Note that only the process of
-            rank 0 is affected, and other processes will set the level to
-            "Error" thus be silent most of the time.
-        file_mode (str): The file mode used in opening log file.
-            Defaults to 'a'.
-        color (bool): Colorful log output. Defaults to True
-
+        name (str): Logger name. Used for hierarchical logger organization.
+        log_file (str, optional): Path to the log file. If provided, enables
+            file-based logging for rank 0 process.
+        log_level (int, optional): Logging level (e.g., logging.INFO). Only
+            affects rank 0 process; others use ERROR level. Default: logging.INFO.
+        file_mode (str, optional): File opening mode ('a' for append, 'w' for
+            write). Default: 'a'.
+        color (bool, optional): Whether to enable colored console output.
+            Default: False.
+    
     Returns:
-        logging.Logger: The expected logger.
+        logging.Logger: Configured logger instance.
+    
+    Note:
+        - In distributed training, only rank 0 process logs at the specified level
+        - Child loggers inherit parent logger's configuration
+        - Loggers are cached to avoid duplicate initialization
+    
+    Example:
+        >>> logger = get_logger('train', 'train.log', logging.INFO)
+        >>> logger.info('Starting training...')
     """
     logger = logging.getLogger(name)
 
@@ -112,17 +162,28 @@ def get_logger(name, log_file=None, log_level=logging.INFO, file_mode="a", color
 
 
 def print_log(msg, logger=None, level=logging.INFO):
-    """Print a log message.
-
+    """Print a log message with flexible output options.
+    
+    This function provides a unified interface for logging messages through
+    different channels (print, logger, or silent).
+    
     Args:
-        msg (str): The message to be logged.
-        logger (logging.Logger | str | None): The logger to be used.
-            Some special loggers are:
-            - "silent": no message will be printed.
-            - other str: the logger obtained with `get_root_logger(logger)`.
-            - None: The `print()` method will be used to print log messages.
-        level (int): Logging level. Only available when `logger` is a Logger
-            object or "root".
+        msg (str): The message to log.
+        logger (Union[logging.Logger, str, None]): The logger to use. Special values:
+            - None: Use print() function
+            - "silent": Suppress output
+            - str: Use as name to get logger
+            - logging.Logger: Use directly
+        level (int, optional): Logging level when using a logger.
+            Default: logging.INFO.
+    
+    Raises:
+        TypeError: If logger is not one of the supported types.
+    
+    Example:
+        >>> print_log('Starting epoch 1', 'train')  # Uses 'train' logger
+        >>> print_log('Debug info', None)  # Uses print()
+        >>> print_log('Silent message', 'silent')  # No output
     """
     if logger is None:
         print(msg)
@@ -141,22 +202,26 @@ def print_log(msg, logger=None, level=logging.INFO):
 
 
 def get_root_logger(log_file=None, log_level=logging.INFO, file_mode="a"):
-    """Get the root logger.
-
-    The logger will be initialized if it has not been initialized. By default a
-    StreamHandler will be added. If `log_file` is specified, a FileHandler will
-    also be added. The name of the root logger is the top-level package name.
-
+    """Get the root logger for the Pointcept framework.
+    
+    This is a convenience function that returns a logger named 'pointcept'
+    with the specified configuration. It's typically used as the main logger
+    for the entire framework.
+    
     Args:
-        log_file (str | None): The log filename. If specified, a FileHandler
-            will be added to the root logger.
-        log_level (int): The root logger level. Note that only the process of
-            rank 0 is affected, while other processes will set the level to
-            "Error" and be silent most of the time.
-        file_mode (str): File Mode of logger. (w or a)
-
+        log_file (str, optional): Path to the log file. If provided, enables
+            file-based logging for rank 0 process.
+        log_level (int, optional): Logging level (e.g., logging.INFO). Only
+            affects rank 0 process; others use ERROR level. Default: logging.INFO.
+        file_mode (str, optional): File opening mode ('a' for append, 'w' for
+            write). Default: 'a'.
+    
     Returns:
-        logging.Logger: The root logger.
+        logging.Logger: The root logger for Pointcept.
+    
+    Example:
+        >>> logger = get_root_logger('train.log')
+        >>> logger.info('Pointcept framework initialized')
     """
     logger = get_logger(
         name="pointcept", log_file=log_file, log_level=log_level, file_mode=file_mode
@@ -165,8 +230,16 @@ def get_root_logger(log_file=None, log_level=logging.INFO, file_mode="a"):
 
 
 def _log_api_usage(identifier: str):
-    """
-    Internal function used to log the usage of different detectron2 components
-    inside facebook's infra.
+    """Log the usage of Pointcept API components.
+    
+    Internal function used to track the usage of different Pointcept components
+    for monitoring and improvement purposes.
+    
+    Args:
+        identifier (str): The identifier of the API component being used.
+    
+    Note:
+        This function uses PyTorch's internal API usage tracking mechanism
+        and ensures each identifier is only logged once per process.
     """
     torch._C._log_api_usage_once("pointcept." + identifier)

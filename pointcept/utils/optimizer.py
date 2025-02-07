@@ -1,5 +1,14 @@
 """
-Optimizer
+Optimizer Module
+
+This module provides functionality for building and configuring optimizers for model training.
+It supports various PyTorch optimizers and allows for flexible parameter group configuration.
+
+Features:
+- Registry-based optimizer management
+- Support for parameter groups with different learning rates
+- Built-in support for SGD, Adam, and AdamW optimizers
+- Flexible parameter group configuration based on parameter name matching
 
 Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
 Please cite our work if the code is helpful to you.
@@ -11,13 +20,75 @@ from pointcept.utils.registry import Registry
 
 OPTIMIZERS = Registry("optimizers")
 
+# Register PyTorch optimizers with docstrings
+OPTIMIZERS.register_module(
+    module=torch.optim.SGD,
+    name="SGD",
+    doc="""Stochastic Gradient Descent optimizer.
+    
+    Implements stochastic gradient descent with optional momentum and weight decay.
+    Nesterov momentum is based on the formula from paper "On the importance of initialization
+    and momentum in deep learning".
+    
+    For details, see PyTorch documentation: torch.optim.SGD""")
 
-OPTIMIZERS.register_module(module=torch.optim.SGD, name="SGD")
-OPTIMIZERS.register_module(module=torch.optim.Adam, name="Adam")
-OPTIMIZERS.register_module(module=torch.optim.AdamW, name="AdamW")
+OPTIMIZERS.register_module(
+    module=torch.optim.Adam,
+    name="Adam",
+    doc="""Adam optimizer.
+    
+    Implements Adam algorithm as described in "Adam: A Method for Stochastic Optimization".
+    It has been proposed by Kingma and Ba in https://arxiv.org/abs/1412.6980.
+    
+    For details, see PyTorch documentation: torch.optim.Adam""")
+
+OPTIMIZERS.register_module(
+    module=torch.optim.AdamW,
+    name="AdamW",
+    doc="""AdamW optimizer.
+    
+    Implements AdamW algorithm, a variant of Adam with proper weight decay as described
+    in "Decoupled Weight Decay Regularization" by Loshchilov & Hutter.
+    
+    For details, see PyTorch documentation: torch.optim.AdamW""")
 
 
 def build_optimizer(cfg, model, param_dicts=None):
+    """Build an optimizer for model parameters with support for parameter groups.
+
+    This function creates an optimizer instance based on the provided configuration and model.
+    It supports creating parameter groups with different learning rates, momentum, and weight decay
+    based on parameter name matching.
+
+    Args:
+        cfg: Configuration object containing optimizer settings with the following fields:
+            - type: Optimizer type (e.g., 'SGD', 'Adam', 'AdamW')
+            - lr: Base learning rate
+            - Other optimizer-specific parameters (e.g., momentum, weight_decay)
+        model (nn.Module): Model whose parameters need to be optimized.
+        param_dicts (list, optional): List of parameter group dictionaries. Each dict can contain:
+            - keyword: String to match parameter names
+            - lr: Learning rate for the group
+            - momentum: Momentum for the group
+            - weight_decay: Weight decay for the group
+
+    Returns:
+        torch.optim.Optimizer: Configured optimizer instance.
+
+    Example:
+        >>> cfg = Config(type='Adam', lr=0.001)
+        >>> param_dicts = [
+        ...     dict(keyword='backbone', lr=0.0001),
+        ...     dict(keyword='head', lr=0.001)
+        ... ]
+        >>> optimizer = build_optimizer(cfg, model, param_dicts)
+
+    Notes:
+        - If param_dicts is None, all model parameters use the same settings from cfg.
+        - Parameters matching no keywords go to the default group (group 0).
+        - Parameters matching a keyword go to the corresponding group.
+        - The function logs parameter grouping information through the root logger.
+    """
     if param_dicts is None:
         cfg.params = model.parameters()
     else:

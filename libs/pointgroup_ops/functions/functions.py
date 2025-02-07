@@ -4,17 +4,27 @@ import pointgroup_ops_cuda
 
 
 class BallQueryBatchP(Function):
+    """
+    Custom autograd Function implementing batch-wise ball query for point clouds.
+    """
+
     @staticmethod
     def forward(ctx, coords, batch_idxs, batch_offsets, radius, meanActive):
         """
-        :param ctx:
-        :param coords: (n, 3) float
-        :param batch_idxs: (n) int
-        :param batch_offsets: (B+1) int
-        :param radius: float
-        :param meanActive: int
-        :return: idx (nActive), int
-        :return: start_len (n, 2), int
+        Forward pass of batch-wise ball query.
+
+        Args:
+            ctx: Context object for autograd.
+            coords (torch.Tensor): Point coordinates (n, 3), float.
+            batch_idxs (torch.Tensor): Batch indices for each point (n), int.
+            batch_offsets (torch.Tensor): Offsets for each batch (B+1), int.
+            radius (float): Radius for ball query.
+            meanActive (int): Initial estimate of mean number of points per ball.
+
+        Returns:
+            tuple: (idx, start_len) where:
+                - idx (torch.Tensor): Indices of points within balls (nActive), int
+                - start_len (torch.Tensor): Start and length information for each point (n, 2), int
         """
 
         n = coords.size(0)
@@ -38,6 +48,17 @@ class BallQueryBatchP(Function):
 
     @staticmethod
     def backward(ctx, a=None, b=None):
+        """
+        Backward pass of batch-wise ball query (no gradients needed).
+
+        Args:
+            ctx: Context object for autograd.
+            a: First gradient from downstream operations (unused).
+            b: Second gradient from downstream operations (unused).
+
+        Returns:
+            None: No gradients to propagate.
+        """
         return None, None, None
 
 
@@ -55,6 +76,18 @@ class Clustering:
         propose_points=100,
         score_func=torch.max,
     ) -> None:
+        """
+        Initialize the Clustering class for point cloud instance segmentation.
+
+        Args:
+            ignored_labels (list): List of labels to ignore during clustering.
+            class_mapping (torch.Tensor): Mapping from input labels to output class indices.
+            thresh (float, optional): Distance threshold for clustering. Defaults to 0.03.
+            closed_points (int, optional): Number of closed points to consider. Defaults to 300.
+            min_points (int, optional): Minimum points required for a valid cluster. Defaults to 50.
+            propose_points (int, optional): Minimum points required for a proposal. Defaults to 100.
+            score_func (callable, optional): Function to compute cluster scores. Defaults to torch.max.
+        """
         self.ignored_labels = ignored_labels
         self.thresh = thresh
         self.closed_points = closed_points
@@ -64,6 +97,18 @@ class Clustering:
         self.score_func = score_func
 
     def cluster(self, vertices, scores):
+        """
+        Perform clustering on point cloud vertices based on semantic scores.
+
+        Args:
+            vertices (torch.Tensor): Point cloud vertices (N, 3).
+            scores (torch.Tensor): Semantic scores for each vertex.
+
+        Returns:
+            tuple: (proposals_pred, labels) where:
+                - proposals_pred (torch.Tensor): Binary mask for each proposal (nProposal, N)
+                - labels (torch.Tensor): Semantic labels for each proposal
+        """
         labels = torch.max(scores, 1)[1]  # (N) long, cuda
         proposals_idx, proposals_offset = self.cluster_(vertices, labels)
 
@@ -88,8 +133,16 @@ class Clustering:
 
     def cluster_(self, vertices, labels):
         """
-        :param batch_idxs: (N), int, cuda
-        :labels: 0-19
+        Internal clustering function that handles the core clustering logic.
+
+        Args:
+            vertices (torch.Tensor): Point cloud vertices (N, 3).
+            labels (torch.Tensor): Semantic labels for each vertex (N).
+
+        Returns:
+            tuple: (proposals_idx, proposals_offset) where:
+                - proposals_idx (torch.Tensor): Indices for each proposal point (nPoints, 2)
+                - proposals_offset (torch.Tensor): Offsets for each proposal
         """
         batch_idxs = torch.zeros_like(labels)
 
@@ -120,6 +173,20 @@ class Clustering:
         return proposals_idx, proposals_offset
 
     def get_instances(self, vertices, scores):
+        """
+        Get instance segmentation results from clustered points.
+
+        Args:
+            vertices (torch.Tensor): Point cloud vertices (N, 3).
+            scores (torch.Tensor): Semantic scores for each vertex.
+
+        Returns:
+            dict: Dictionary containing instance information where each key is a proposal_id and
+                 values contain:
+                 - 'conf': Confidence score
+                 - 'label_id': Semantic label ID
+                 - 'pred_mask': Binary mask for the instance
+        """
         proposals_pred, labels = self.cluster(vertices, scores)
         instances = {}
         for proposal_id in range(len(proposals_pred)):
@@ -136,17 +203,27 @@ class Clustering:
 
 
 class BFSCluster(Function):
+    """
+    Custom autograd Function implementing Breadth-First Search clustering for point clouds.
+    """
+
     @staticmethod
     def forward(ctx, semantic_label, ball_query_idxs, start_len, threshold):
         """
-        :param ctx:
-        :param semantic_label: (N), int
-        :param ball_query_idxs: (nActive), int
-        :param start_len: (N, 2), int
-        :return: cluster_idxs:  int (sumNPoint, 2), dim 0 for cluster_id, dim 1 for corresponding point idxs in N
-        :return: cluster_offsets: int (nCluster + 1)
-        """
+        Forward pass of BFS clustering.
 
+        Args:
+            ctx: Context object for autograd.
+            semantic_label (torch.Tensor): Semantic labels for each point (N).
+            ball_query_idxs (torch.Tensor): Ball query indices (nActive).
+            start_len (torch.Tensor): Start and length information for each point (N, 2).
+            threshold (int): Minimum number of points required for a valid cluster.
+
+        Returns:
+            tuple: (cluster_idxs, cluster_offsets) where:
+                - cluster_idxs (torch.Tensor): Indices for cluster points (sumNPoint, 2)
+                - cluster_offsets (torch.Tensor): Offsets for each cluster (nCluster + 1)
+        """
         N = start_len.size(0)
 
         assert semantic_label.is_contiguous()
@@ -170,6 +247,16 @@ class BFSCluster(Function):
 
     @staticmethod
     def backward(ctx, a=None):
+        """
+        Backward pass of BFS clustering (no gradients needed).
+
+        Args:
+            ctx: Context object for autograd.
+            a: Gradient from downstream operations (unused).
+
+        Returns:
+            None: No gradients to propagate.
+        """
         return None
 
 
