@@ -62,10 +62,15 @@ for obj_type in ['wall', 'pipe']:
         except Exception as e:
             print(f"Error getting mesh vertices for {obj_file}: {e}")
             continue
-        min_bounds = np.min(mesh_vertices, axis=0)
-        max_bounds = np.max(mesh_vertices, axis=0)
-        search_min = min_bounds - SEARCH_RADIUS
-        search_max = max_bounds + SEARCH_RADIUS
+
+        try:
+            min_bounds = np.min(mesh_vertices, axis=0)
+            max_bounds = np.max(mesh_vertices, axis=0)
+            search_min = min_bounds - SEARCH_RADIUS
+            search_max = max_bounds + SEARCH_RADIUS
+        except Exception as e:
+            print(f"Error getting mesh bounds for {obj_file}: {e}")
+            continue
 
         # Find points within expanded bounds
         in_x = (transformed_points[:, 0] >= search_min[0]) & (transformed_points[:, 0] <= search_max[0])
@@ -76,6 +81,10 @@ for obj_type in ['wall', 'pipe']:
 
         if len(candidate_indices) == 0:
             print(f"No candidates for {obj_file}")
+            continue
+
+        if len(candidate_indices) > 2000000:
+            print(f"Skipping {obj_file} due to too many candidates")
             continue
 
         # Calculate exact distances to mesh surface
@@ -94,26 +103,47 @@ for obj_type in ['wall', 'pipe']:
 
         print(f"{obj_type.capitalize()} {instance_id}: {len(update_indices)} points labeled")
 
-# Update LAS data with transformed coordinates and labels
-las.x = transformed_points[:, 0]
-las.y = transformed_points[:, 1]
-las.z = transformed_points[:, 2]
+print("Creating new LAS file with labeled points")
+header = laspy.LasHeader(point_format=7, version="1.4")
+new_las = laspy.LasData(header)
 
-# Add dimensions if they don't exist
-for name, dtype in [('semantic_id', np.uint32), ('instance_id', np.uint32)]:
-    if name not in las.point_format.extra_dimension_names:
-        las.add_extra_dim(laspy.ExtraBytesParams(
-            name=name,
-            type=dtype,
-            description=f"{name.replace('_', ' ').title()}"
-        ))
+# Copy XYZ from transformed_points
+new_las.x = transformed_points[:, 0]
+new_las.y = transformed_points[:, 1]
+new_las.z = transformed_points[:, 2]
 
-las.semantic_id = semantic_labels
-las.instance_id = instance_labels
+# Copy other standard dimensions if they exist
+for dim in ['intensity', 'return_number', 'number_of_returns',
+            'classification', 'user_data',
+            'scan_angle', 'point_source_id', 'gps_time']:
+    if hasattr(las, dim):
+        setattr(new_las, dim, getattr(las, dim))
+
+# Add extra dimensions for semantic and instance IDs
+if 'semantic_id' not in new_las.point_format.extra_dimension_names:
+    new_las.add_extra_dim(
+        laspy.ExtraBytesParams(
+            name='semantic_id',
+            type=np.uint32,
+            description='Semantic ID'
+        )
+    )
+if 'instance_id' not in new_las.point_format.extra_dimension_names:
+    new_las.add_extra_dim(
+        laspy.ExtraBytesParams(
+            name='instance_id',
+            type=np.uint32,
+            description='Instance ID'
+        )
+    )
+
+new_las.semantic_id = semantic_labels
+new_las.instance_id = instance_labels
 
 # Save results
 output_dir = Path("/mnt/d/labeled_laz")
 output_dir.mkdir(parents=True, exist_ok=True)
 output_path = output_dir / f"{project_id}_labeled.laz"
-las.write(output_path, do_compress=True)
-print(f"Saved labeled point cloud to {output_path}")
+
+new_las.write(output_path, do_compress=True)
+print(f"Saved labeled point cloud to {output_path} (LAS version 1.4)")

@@ -195,7 +195,7 @@ try:
     
     # Copy other standard dimensions if they exist in the original file
     for dim in ['intensity', 'return_number', 'number_of_returns', 
-                'classification', 'scan_angle_rank', 'user_data',
+                'classification', 'user_data',
                 'scan_angle', 'point_source_id', 'gps_time']:
         if hasattr(las, dim):
             setattr(new_las, dim, getattr(las, dim))
