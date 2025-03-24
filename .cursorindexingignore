@@ -1,0 +1,10 @@
+/xnotes
+.cursor/templates/*.md
+/node_modules
+
+
+# WIP
+demo.py
+downsample_pc.ipynb
+my_functions.py
+setup_env2

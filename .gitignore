@@ -18,3 +18,9 @@ Dockerfile
 .history
 
 logs
+
+# WIP
+demo.py
+downsample_pc.ipynb
+my_functions.py
+setup_env2

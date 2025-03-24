@@ -20,37 +20,18 @@ from pointcept.utils.registry import Registry
 
 OPTIMIZERS = Registry("optimizers")
 
-# Register PyTorch optimizers with docstrings
+# Register PyTorch optimizers
 OPTIMIZERS.register_module(
     module=torch.optim.SGD,
-    name="SGD",
-    doc="""Stochastic Gradient Descent optimizer.
-    
-    Implements stochastic gradient descent with optional momentum and weight decay.
-    Nesterov momentum is based on the formula from paper "On the importance of initialization
-    and momentum in deep learning".
-    
-    For details, see PyTorch documentation: torch.optim.SGD""")
+    name="SGD")
 
 OPTIMIZERS.register_module(
     module=torch.optim.Adam,
-    name="Adam",
-    doc="""Adam optimizer.
-    
-    Implements Adam algorithm as described in "Adam: A Method for Stochastic Optimization".
-    It has been proposed by Kingma and Ba in https://arxiv.org/abs/1412.6980.
-    
-    For details, see PyTorch documentation: torch.optim.Adam""")
+    name="Adam")
 
 OPTIMIZERS.register_module(
     module=torch.optim.AdamW,
-    name="AdamW",
-    doc="""AdamW optimizer.
-    
-    Implements AdamW algorithm, a variant of Adam with proper weight decay as described
-    in "Decoupled Weight Decay Regularization" by Loshchilov & Hutter.
-    
-    For details, see PyTorch documentation: torch.optim.AdamW""")
+    name="AdamW")
 
 
 def build_optimizer(cfg, model, param_dicts=None):
